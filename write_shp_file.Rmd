@@ -1,0 +1,17 @@
+---
+title: "load_gdb_files"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(sf)
+```
+
+```{r}
+dc_nfhl = st_read("./data/NFHL_11_20241031.gdb", layer = "S_FLD_HAZ_AR")
+```
+
+```{r}
+st_write(dc_nfhl, "./data/dc_nfhl_shapefile.shp")
+```
