@@ -1,0 +1,119 @@
+---
+title: "FEMA Flood Zones in Washington, D.C."
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Load Required Libraries
+
+```{r libraries}
+library(sf)
+library(ggplot2)
+library(tigris)
+library(dplyr)
+library(viridis)
+options(tigris_use_cache = TRUE)
+sf::sf_use_s2(FALSE)  # Disable S2 geometry engine to avoid topology errors
+```
+
+## Load and Prepare Data
+
+```{r load-data}
+# Load FEMA Flood Zones shapefile (update path to your file)
+flood_zones <- st_read("/Users/apanasovich/Downloads/Floodplains/Floodplains.shp")
+
+# Load DC boundary
+dc_boundary <- counties(state = "DC", cb = TRUE, class = "sf")
+
+# Load DC census tracts
+dc_tracts <- tracts(state = "DC", year = 2020, cb = TRUE, class = "sf")
+
+# Ensure same CRS for all layers
+flood_zones <- st_transform(flood_zones, st_crs(dc_boundary))
+dc_tracts <- st_transform(dc_tracts, st_crs(dc_boundary))
+
+# Fix invalid geometries
+flood_zones <- st_make_valid(flood_zones)
+dc_tracts <- st_make_valid(dc_tracts)
+
+# Intersect flood zones with DC boundary
+flood_zones_dc <- st_intersection(flood_zones, dc_boundary)
+
+# Keep only Zones A and AE
+flood_zones_dc <- flood_zones_dc %>%
+  filter(FLD_ZONE %in% c("A", "AE"))
+
+# Intersect flood zones with census tracts
+flood_tracts_intersection <- st_intersection(dc_tracts, flood_zones_dc)
+
+# Calculate intersection area
+flood_tracts_intersection$intersection_area <- st_area(flood_tracts_intersection)
+
+# Aggregate flood area by tract
+flood_by_tract <- flood_tracts_intersection |>
+  group_by(GEOID) |>
+  summarise(flood_area = sum(intersection_area)) |>
+  ungroup()
+
+# Merge with full tract data
+dc_tracts$flood_area <- flood_by_tract$flood_area[match(dc_tracts$GEOID, flood_by_tract$GEOID)]
+dc_tracts$flood_area[is.na(dc_tracts$flood_area)] <- 0
+
+# Calculate total tract area and percent
+dc_tracts$tract_area <- st_area(dc_tracts)
+dc_tracts$flood_pct <- 100 * as.numeric(dc_tracts$flood_area) / as.numeric(dc_tracts$tract_area)
+```
+
+## Plot All Flood Zones
+
+```{r plot-all-zones}
+ggplot() +
+  geom_sf(data = flood_zones_dc, aes(fill = FLD_ZONE), color = NA) +
+  geom_sf(data = dc_boundary, fill = NA, color = "black", size = 0.5) +
+  scale_fill_viridis_d(name = "Flood Zone") +
+  theme_minimal() +
+  labs(
+    title = "FEMA Flood Zones in Washington, D.C.",
+    caption = "Source: FEMA NFHL"
+  )
+```
+
+## Plot Flood Zone A Only
+
+```{r plot-zone-a}
+# Filter for Zone A only
+zone_a <- flood_zones_dc %>% 
+  dplyr::filter(FLD_ZONE == "A")
+
+ggplot() +
+  geom_sf(data = dc_boundary, fill = "grey98", color = "black", size = 0.6) +
+  geom_sf(data = zone_a, fill = "red", color = "darkred", alpha = 0.7, size = 0.4) +
+  theme_minimal() +
+  labs(
+    title = "FEMA Flood Zone A in Washington, D.C.",
+    subtitle = "Zone A (1% annual chance flood hazard)",
+    caption = "Source: FEMA NFHL"
+  )
+```
+
+## Plot Percent of Tract Area in Zones A or AE
+
+```{r plot-flood-pct}
+ggplot(dc_tracts) +
+  geom_sf(aes(fill = flood_pct), color = NA) +
+  scale_fill_viridis_c(
+    name = "% Area in Zones A or AE",
+    option = "magma",
+    na.value = "white",
+    direction = -1
+  ) +
+  theme_minimal() +
+  labs(
+    title = "DC Census Tracts in FEMA Flood Zones A and AE",
+    subtitle = "Proportion of each tract located in high-risk flood zones",
+    caption = "Data: FEMA NFHL & US Census Bureau"
+  )
+```

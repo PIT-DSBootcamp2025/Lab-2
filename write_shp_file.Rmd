@@ -15,3 +15,15 @@ dc_nfhl = st_read("./data/NFHL_11_20241031.gdb", layer = "S_FLD_HAZ_AR")
 ```{r}
 st_write(dc_nfhl, "./data/dc_nfhl_shapefile.shp")
 ```
+
+
+```{r}
+head(dc_nfhl)
+library(ggplot2)
+ggplot(data = dc_nfhl, aes(geometry = SHAPE, fill = as.factor(FLD_ZONE))) + 
+  geom_sf() +
+  coord_sf()
+```
+
+
+

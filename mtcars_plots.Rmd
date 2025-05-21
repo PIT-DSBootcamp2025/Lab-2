@@ -1,0 +1,54 @@
+---
+title: ''
+author: "Alonzo Finch"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(ggpubr)
+```
+
+```{r}
+data(mtcars)
+mtcars <- as_tibble(mtcars)
+```
+
+```{r}
+summary(mtcars)
+```
+
+```{r}
+ggplot(data = mtcars) +
+  geom_histogram(aes(x = hp), bins = 35)
+```
+
+```{r}
+ggplot(data = mtcars) + 
+  geom_point(aes(x = am, y = hp)) + 
+  geom_abline(aes(slope = 0, intercept = 200))
+```
+
+```{r}
+a = ggplot(data = mtcars) +
+  geom_histogram(aes(x = hp), bins = 35)
+b = ggplot(data = mtcars) + 
+  geom_point(aes(x = am, y = hp)) + 
+  geom_abline(aes(slope = 0, intercept = 200))
+grid.arrange(a, b, nrow = 1)
+```
+
+
+```{r}
+ggplot(data = mtcars) + 
+  geom_histogram(aes(x = wt, fill = as.factor(vs)))
+```
+
+
+

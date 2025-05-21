@@ -1,0 +1,192 @@
+---
+title: "Flood–Health Equity Analysis in Washington, D.C."
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(sf)
+library(readxl)
+library(tmap)
+library(readr)
+library(dplyr)
+library(tigris)
+library(ggplot2)
+library(patchwork)
+library(tidyr)
+library(GGally)
+```
+
+```{r load-tracts}
+options(tigris_use_cache = TRUE)
+tracts_sf <- tracts(state = "DC", year = 2020, cb = TRUE, class = "sf")
+```
+
+```{r load-ejscreen}
+ejscreen <- read_csv("/Users/apanasovich/Downloads/EJI_2024_United_States_CSV (1)/EJI_2024_United_States.csv") %>%
+  filter(STATEFP == "11")
+
+ejscreen_selected <- ejscreen %>%
+  filter(STATEFP == "11") %>%
+  select(
+    GEOID,
+    E_POV200,
+    E_NOHSDP,
+    E_UNEMP,
+    E_RENTER,
+    E_HOUBDN,
+    E_UNINSUR,
+    E_NOINT
+  )
+
+dc_ejscreen_selected <- tracts_sf %>%
+  left_join(ejscreen_selected, by = "GEOID")
+```
+
+```{r missing-values-summary}
+dc_ejscreen_selected %>%
+  st_drop_geometry() %>%
+  summarise(across(everything(), ~ sum(is.na(.))))
+```
+
+```{r histograms-matrix}
+df_plot <- dc_ejscreen_selected %>%
+  st_drop_geometry() %>%
+  select(E_POV200, E_NOHSDP, E_UNEMP, E_RENTER, E_HOUBDN, E_UNINSUR, E_NOINT)
+
+p1 <- ggplot(df_plot, aes(x = E_POV200)) + geom_histogram() + ggtitle("Poverty < 200% FPL")
+p2 <- ggplot(df_plot, aes(x = E_NOHSDP)) + geom_histogram() + ggtitle("No HS Diploma")
+p3 <- ggplot(df_plot, aes(x = E_UNEMP)) + geom_histogram() + ggtitle("Unemployed")
+p4 <- ggplot(df_plot, aes(x = E_RENTER)) + geom_histogram() + ggtitle("Renter Occupied")
+p5 <- ggplot(df_plot, aes(x = E_HOUBDN)) + geom_histogram() + ggtitle("Housing Burden")
+p6 <- ggplot(df_plot, aes(x = E_UNINSUR)) + geom_histogram() + ggtitle("Uninsured")
+p7 <- ggplot(df_plot, aes(x = E_NOINT)) + geom_histogram() + ggtitle("No Internet")
+
+empty <- ggplot() + theme_void()
+
+(p1 | p2) /
+(p3 | p4) /
+(p5 | p6) /
+(p7 | empty)
+```
+
+```{r recode-missing-values}
+dc_ejscreen_selected <- dc_ejscreen_selected %>%
+  mutate(across(starts_with("E_"), ~ na_if(., -999.00)))
+```
+
+```{r map-poverty-tracts}
+tracts_pov100 <- dc_ejscreen_selected %>%
+  filter(E_POV200 == 100)
+
+tm_shape(dc_ejscreen_selected) +
+  tm_polygons(col = "gray90", border.col = "white") +
+  tm_shape(tracts_pov100) +
+  tm_borders(col = "red", lwd = 2) +
+  tm_fill(col = "red", alpha = 0.6) +
+  tm_layout(main.title = "DC Tracts with 100% Below 200% FPL", legend.outside = TRUE)
+```
+
+```{r missing-rows}
+dc_ejscreen_selected %>%
+  filter(if_any(c(E_POV200, E_NOHSDP, E_UNEMP, E_RENTER, E_HOUBDN, E_UNINSUR, E_NOINT), is.na))
+```
+
+```{r scatterplot-matrix}
+df_scatter <- dc_ejscreen_selected %>%
+  st_drop_geometry() %>%
+  select(E_POV200, E_NOHSDP, E_UNEMP, E_RENTER, E_HOUBDN, E_UNINSUR, E_NOINT)
+
+ggpairs(df_scatter)
+```
+
+```{r filter-complete}
+dc_complete <- dc_ejscreen_selected %>%
+  filter(if_all(c(E_POV200, E_NOHSDP, E_UNEMP, E_RENTER, E_HOUBDN, E_UNINSUR, E_NOINT), ~ !is.na(.)))
+```
+
+```{r composite-score}
+df_ranked <- dc_complete %>%
+  mutate(across(everything(), ~ percent_rank(.)))
+df_ranked$VULN_SCORE <- rowSums(df_ranked, na.rm = TRUE)
+df_ranked$vulnerable <- df_ranked$VULN_SCORE >= quantile(df_ranked$VULN_SCORE, 0.75)
+```
+
+```{r map-composite-score}
+dc_plot <- dc_ejscreen_selected %>%
+  mutate(
+    VULN_SCORE = if_else(
+      if_all(c(E_POV200, E_NOHSDP, E_UNEMP, E_RENTER, E_HOUBDN, E_UNINSUR, E_NOINT), ~ !is.na(.)),
+      rowSums(across(c(E_POV200, E_NOHSDP, E_UNEMP, E_RENTER, E_HOUBDN, E_UNINSUR, E_NOINT), ~ percent_rank(.))),
+      NA_real_
+    )
+  )
+
+tm_shape(dc_plot) +
+  tm_polygons(
+    col = "VULN_SCORE",
+    palette = "YlOrRd",
+    title = "Vulnerability Score",
+    textNA = "Missing",
+    colorNA = "black"
+  ) +
+  tm_layout(main.title = "Composite Vulnerability in DC (Black = Missing)", legend.outside = TRUE)
+```
+
+```{r map-vulnerable-interactive}
+tmap_mode("plot")
+
+dc_ejscreen_selected <- dc_ejscreen_selected %>%
+  mutate(
+    VULN_SCORE = if_else(
+      if_all(c(E_POV200, E_NOHSDP, E_UNEMP, E_RENTER, E_HOUBDN, E_UNINSUR, E_NOINT), ~ !is.na(.)),
+      rowSums(across(c(E_POV200, E_NOHSDP, E_UNEMP, E_RENTER, E_HOUBDN, E_UNINSUR, E_NOINT), ~ percent_rank(.))),
+      NA_real_
+    )
+  )
+
+vulnerable_only <- dc_ejscreen_selected %>%
+  filter(!is.na(VULN_SCORE) & VULN_SCORE >= quantile(VULN_SCORE, 0.75, na.rm = TRUE))
+
+tm_shape(dc_ejscreen_selected) +
+  tm_basemap("OpenStreetMap") +
+  tm_shape(vulnerable_only) +
+  tm_polygons(
+    fill = "red",
+    fill_alpha = 0.5,
+    col = NA
+  ) +
+  tm_title("Vulnerable Census Tracts in Washington, D.C.")
+```
+
+```{r asthma-correlation}
+dc_ejscreen_selected <- dc_ejscreen_selected %>%
+  left_join(ejscreen %>% select(GEOID, E_ASTHMA), by = "GEOID")
+
+df_health <- dc_ejscreen_selected %>%
+  st_drop_geometry() %>%
+  select(E_ASTHMA, E_POV200, E_NOHSDP, E_UNEMP, E_RENTER,
+         E_HOUBDN, E_UNINSUR, E_NOINT)
+
+df_long <- df_health %>%
+  pivot_longer(-E_ASTHMA, names_to = "SDOH", values_to = "value")
+
+ggplot(df_long, aes(x = value, y = E_ASTHMA)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  facet_wrap(~ SDOH, scales = "free_x") +
+  labs(
+    title = "Asthma Prevalence vs Social Determinants",
+    y = "E_ASTHMA (%)",
+    x = NULL
+  ) +
+  theme_minimal()
+
+df_corr <- df_health %>%
+  filter(if_all(everything(), ~ !is.na(.)))
+
+cor_spearman <- cor(df_corr, method = "spearman")
+cor_spearman["E_ASTHMA", -1]
+```
